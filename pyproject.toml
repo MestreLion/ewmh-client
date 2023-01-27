@@ -1,0 +1,89 @@
+### WORK IN PROGRESS!!!
+
+# -----------------------------------------------------------------------------
+# Metadata
+# https://packaging.python.org/en/latest/specifications/declaring-project-metadata/
+[project]
+name = "ewmh-client"
+#version = "0.0.1"
+dynamic = ["version"]  # see [tool.setuptools.dynamic]
+authors = [
+    {name="Rodrigo Silva (MestreLion)", email="linux@rodrigosilva.com"},
+]
+description = "EWMH (Extended Window Manager Hints) Client API"
+license =  {text = "GPL-3.0-or-later"}  # Free text, using SPDX
+urls."Homepage" = "https://github.com/MestreLion/ewmh-client"
+urls."Source Code" = "https://github.com/MestreLion/ewmh-client"
+urls."Bug Tracker" = "https://github.com/MestreLion/ewmh-client/issues"
+readme = "README.md"
+keywords = [ "ewmh", "icccm", "x", "x11", "windows", "xlib"]
+classifiers = [
+    # https://pypi.org/classifiers/
+    "Development Status :: 1 - Planning",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Natural Language :: English",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Desktop Environment",
+    "Topic :: Desktop Environment :: Window Managers",
+    "Topic :: Multimedia :: Video :: Display",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+    "Typing :: Typed",
+]
+
+# -----------------------------------------------------------------------------
+# Requirements
+requires-python = ">=3.7"  # from setuptools >= 59.3 and other dependencies
+dependencies = [
+    "python-xlib",
+    "typing_extensions",
+]
+[project.optional-dependencies]
+dev = [
+    "black",
+    "mypy >= 0.900",  # TypeGuard, pyproject.toml
+    "types-python-xlib",
+]
+# -----------------------------------------------------------------------------
+# Entry points
+#[project.scripts]
+#my-script = "my_package.module:function"
+
+# -----------------------------------------------------------------------------
+# Building
+
+[build-system]
+requires = ["setuptools >= 61.0.0"]  # Supports pyproject.toml configuration
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "ewmh_client.__version__"}
+
+# -----------------------------------------------------------------------------
+# Tools
+
+# Run as: mypy
+[tool.mypy]
+files = ["ewmh_client.py"]
+strict = true
+
+# Run as: black .
+[tool.black]
+target-version = ["py37", "py38", "py39", "py310", "py311"]
+line-length = 94
+#include = '\.pyi?$'
+
+#[tool.isort]
+#profile = "black"
+#src_paths = ["ewmh_client.py"]
+#line_length = 94
