@@ -1,7 +1,0 @@
-python-xlib
-typing_extensions
-
-# Dev
-mypy
-black
-types-python-xlib
