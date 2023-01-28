@@ -80,7 +80,17 @@ PropertyValue: te.TypeAlias = t.Union[bytes, t.Sequence[int]]
 
 
 class Source(enum.IntEnum):
-    """Source indication in requests
+    """
+    Source indication in requests.
+
+    Some requests from Clients include type of the Client, for example the
+    _NET_ACTIVE_WINDOW message.  Currently, the types can be 1 for normal applications,
+    and 2 for pagers and other Clients that represent direct user actions (the Window
+    Manager may decide to treat requests from applications differently than requests
+    that are result of direct user actions).  Clients that support only older version
+    of this spec will have 0 as their source indication, thus not specifying their
+    source at all.  This also may mean that some fields in the message comply only
+    with the older specification version.
 
     https://specifications.freedesktop.org/wm-spec/latest/ar01s09.html#sourceindication
     """
@@ -509,31 +519,162 @@ class EWMH(Window):
     # Root Window Properties (and Related Messages)
 
     def get_supported(self) -> t.List[XAtom]:
+        """
+        Indicate which hints the Window Manager supports.
+
+        This property MUST be set by the Window Manager.
+
+        For example: considering _NET_WM_STATE both this atom and all supported
+        states e.g. _NET_WM_STATE_MODAL, _NET_WM_STATE_STICKY, would be listed.
+        This assumes that backwards incompatible changes will not be made to
+        the hints (without being renamed).
+        """
         return list(self.get_property("_NET_SUPPORTED", Xlib.Xatom.ATOM).value)
 
-    def get_client_list(self) -> t.List[Window]:
-        return [
-            Window(window_id=w, root=self)
-            for w in self.get_property("_NET_CLIENT_LIST", Xlib.Xatom.WINDOW).value
-        ]
+    def get_client_list(self, _suffix: str = "") -> t.List[Window]:
+        """
+        List that contains all X Windows managed by the Window Manager,
+        by initial mapping order, starting with the oldest window.
+
+        This property SHOULD be set and updated by the Window Manager.
+        """
+        prop = self.get_property("_NET_CLIENT_LIST" + _suffix, Xlib.Xatom.WINDOW)
+        return [Window(window_id=w, root=self) for w in prop.value]
+
+    def get_client_list_stacking(self) -> t.List[Window]:
+        """
+        List that contains all X Windows managed by the Window Manager,
+        in bottom-to-top stacking order.
+
+        This property SHOULD be set and updated by the Window Manager.
+        """
+        return self.get_client_list(_suffix="_STACKING")
 
     def get_number_of_desktops(self) -> int:
+        """
+        Indicate the number of virtual desktops.
+
+        This property SHOULD be set and updated by the Window Manager.
+        """
+        # In Unity, this is 1 even with 4 Workspaces enabled
         return self.get_property("_NET_NUMBER_OF_DESKTOPS", Xlib.Xatom.CARDINAL).value[0]
 
     def set_number_of_desktops(self, new_number_of_desktops: int) -> None:
+        """
+        Request a change in the number of desktops.
+
+        The Window Manager is free to honor or reject this request. If the request
+        is honored _NET_NUMBER_OF_DESKTOPS MUST be set to the new number of desktops,
+        _NET_VIRTUAL_ROOTS MUST be set to store the new number of desktop virtual
+        root window IDs and _NET_DESKTOP_VIEWPORT and _NET_WORKAREA must also be
+        changed accordingly.  The _NET_DESKTOP_NAMES property MAY remain unchanged.
+
+        If the number of desktops is shrinking and _NET_CURRENT_DESKTOP is out of
+        the new range of available desktops, then this MUST be set to the last
+        available desktop from the new set. Clients that are still present on
+        desktops that are out of the new range MUST be moved to the very last
+        desktop from the new set. For these _NET_WM_DESKTOP MUST be updated.
+        """
         self.send_message("_NET_NUMBER_OF_DESKTOPS", new_number_of_desktops)
 
-    #     _net_desktop_geometry
-    #     _net_desktop_viewport
-    #     _net_current_desktop
-    #     _NET_DESKTOP_GEOMETRY
-    #     _NET_DESKTOP_VIEWPORT
-    #     _NET_CURRENT_DESKTOP
+    def get_desktop_geometry(self) -> t.Tuple[int, int]:
+        """
+        Tuple of two cardinals that defines the common size of all desktops.
+
+        (this is equal to the screen size if the Window Manager doesn't support
+        large desktops, otherwise it's equal to the virtual size of the desktop)
+
+        This property SHOULD be set by the Window Manager.
+        """
+        # In Unity, this is the combined area of all workspaces, if enabled.
+        # With 4 Workspaces in a 2x2 arrangement, it returns (3840, 2400)
+        prop = self.get_property("_NET_DESKTOP_GEOMETRY", Xlib.Xatom.CARDINAL)
+        return tuple(prop.value[:2])
+
+    def set_desktop_geometry(self, new_width: int, new_height: int) -> None:
+        """
+        Request a change in the desktop geometry.
+
+        The Window Manager MAY choose to ignore this message, in which case
+        _NET_DESKTOP_GEOMETRY property will remain unchanged.
+        """
+        self.send_message("_NET_DESKTOP_GEOMETRY", new_width, new_height)
+
+    def get_desktop_viewport(self) -> t.List[t.Tuple[int, int]]:
+        """
+        List of pairs of cardinals that define the top left corner of each
+        desktop's viewport.
+
+        For Window Managers that don't support large desktops, this MUST always
+        be set to (0,0), returned as [(0, 0)]
+        """
+        # Unity returns [(0, 0)] even with 4 2x2 Workspaces enabled, possibly a bug.
+        prop = self.get_property("_NET_DESKTOP_VIEWPORT", Xlib.Xatom.CARDINAL)
+        return list(tuple(prop.value[i:i + 2]) for i in range(0, len(prop.value), 2))
+        # Credit given where credit is due: https://stackoverflow.com/a/312464/624066
+
+    def set_desktop_viewport(self, new_vx, new_vy) -> None:
+        """
+        Request to change the viewport for the current desktop.
+
+        The Window Manager MAY choose to ignore this message, in which case
+        _NET_DESKTOP_VIEWPORT property will remain unchanged.
+        """
+        self.send_message("_NET_DESKTOP_VIEWPORT", new_vx, new_vy)
+
+    def get_current_desktop(self) -> int:
+        """
+        The index of the current desktop.
+
+        This is always an integer between 0 and _NET_NUMBER_OF_DESKTOPS - 1.
+        This MUST be set and updated by the Window Manager.
+        """
+        return self.get_property("_NET_CURRENT_DESKTOP", Xlib.Xatom.CARDINAL).value[0]
+
+    def set_current_desktop(self, new_index: int, timestamp: int = Xlib.X.CurrentTime) -> None:
+        """
+        Request to switch to another virtual desktop.
+
+        Note that the timestamp may be 0 for clients using an older version of
+        this spec, in which case the timestamp field should be ignored.
+        """
+        # TODO: Use int(time.time()) timestamp as default if None
+        #  here and possibly also in active_window()
+        self.send_message("_NET_CURRENT_DESKTOP", new_index, timestamp)
 
     def get_desktop_names(self) -> t.List[str]:
-        return self.get_text_property("_NET_DESKTOP_NAMES", self.UTF8_STRING)[:-1].split("\0")
+        """
+        The names of all virtual desktops as a list of strings.
+
+        Note: The number of names could be different from _NET_NUMBER_OF_DESKTOPS.
+        If it is less than _NET_NUMBER_OF_DESKTOPS, then the desktops with high
+        numbers are unnamed. If it is larger than _NET_NUMBER_OF_DESKTOPS, then
+        the excess names outside the _NET_NUMBER_OF_DESKTOPS are considered to
+        be reserved in case the number of desktops is increased.
+
+        Rationale: The name is not a necessary attribute of a virtual desktop.
+        Thus, the availability or unavailability of names has no impact on virtual
+        desktop functionality. Since names are set by users and users are likely
+        to preset names for a fixed number of desktops, it doesn't make sense to
+        shrink or grow this list when the number of available desktops changes.
+        """
+        text = self.get_text_property("_NET_DESKTOP_NAMES", self.UTF8_STRING)
+        return text[:-1].split("\0")
+
+    def set_desktop_names(self, desktop_names: t.Iterable[str]) -> None:
+        """
+        Set the names of all virtual desktops.
+
+        See Note and Rationale in `get_desktop_names()`
+        """
+        text = "\0".join(desktop_names) + "\0"
+        self.set_text_property("_NET_DESKTOP_NAMES", text)
 
     def get_active_window(self) -> Window:
+        """
+        The currently active window or None if no window has the focus.
+        """
+        # TODO: handle None and change return type to Optional, per the spec
         prop = self.get_property("_NET_ACTIVE_WINDOW", Xlib.Xatom.WINDOW)
         return Window(window_id=prop.value[0], root=self)
 
@@ -544,6 +685,24 @@ class EWMH(Window):
         timestamp: int = Xlib.X.CurrentTime,
         requestor_window: t.Optional[Window] = None,
     ) -> None:
+        """
+        Request to activate another window.
+
+        `source_indication` should be 1 when the request comes from an application,
+        and 2 when it comes from a pager.  Clients using older version of this spec
+        use 0 as source indication, see `Source` enum for details.
+
+        `timestamp` is Client's last user activity timestamp (see _NET_WM_USER_TIME)
+        at the time of the request.
+
+        `requestor_window` is the Client's currently active toplevel window, if any.
+         (the Window Manager may be e.g. more likely to obey the request if it will
+         mean transferring focus from one active window to another).
+
+        Depending on the information provided with the message, the Window Manager
+        may decide to refuse the request (either completely ignore it, or e.g. use
+        _NET_WM_STATE_DEMANDS_ATTENTION).
+        """
         self.send_message(
             "_NET_ACTIVE_WINDOW",
             source_indication,
@@ -565,13 +724,37 @@ class EWMH(Window):
 
     # -------------------------------------------------------------------------
     # Other Root Window Messages
-    #     _net_close_window
-    #     _net_moveresize_window
+    def close_window(
+        self,
+        window_to_close: Window,
+        timestamp: int = Xlib.X.CurrentTime,
+        source_indication: Source = Source.USER,
+    ) -> None:
+        """Request the WM to close a Window"""
+        # source_indication and timestamp swap position compared to active_window!
+        self.send_message(
+            "_NET_CLOSE_WINDOW",
+            timestamp,
+            source_indication,
+            window_id=window_to_close.id,
+        )
+
+    def moveresize_window(
+        self,
+        window_to_move: Window,
+        timestamp: int = Xlib.X.CurrentTime,
+        source_indication: Source = Source.USER,
+    ) -> None:
+        return
+        self.send_message(
+            "_NET_MOVERESIZE_WINDOW",
+            timestamp,
+            source_indication,
+            window_id=window_to_move.id,
+        )
     #     _net_wm_moveresize
     #     _net_restack_window
     #     _net_request_frame_extents
-    #     _NET_CLOSE_WINDOW
-    #     _NET_MOVERESIZE_WINDOW
     #     _NET_WM_MOVERESIZE
     #     _NET_RESTACK_WINDOW
     #     _NET_REQUEST_FRAME_EXTENTS
