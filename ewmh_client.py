@@ -124,12 +124,14 @@ class Mode(enum.IntEnum):
 
 class Orientation(enum.IntEnum):
     """Orientation cardinal used in _NET_DESKTOP_LAYOUT"""
+
     HORZ = 0
     VERT = 1
 
 
 class Corner(enum.IntEnum):
     """Starting corner of virtual desktops' layout, used in _NET_DESKTOP_LAYOUT"""
+
     TOPLEFT = 0
     TOPRIGHT = 1
     BOTTOMRIGHT = 2
@@ -505,7 +507,7 @@ class Window:
     @staticmethod
     def _chunked(data: t.Sequence[_T], chunk_size: int) -> t.Iterator[t.Tuple[_T, ...]]:
         # Credit given where credit is due: https://stackoverflow.com/a/312464/624066
-        return (tuple(data[i:i + chunk_size]) for i in range(0, len(data), chunk_size))
+        return (tuple(data[i : i + chunk_size]) for i in range(0, len(data), chunk_size))
 
     # TODO: add some methods from root that act upon itself (close, activate, etc)
 
@@ -651,7 +653,9 @@ class EWMH(Window):
         """
         return self.get_property("_NET_CURRENT_DESKTOP", Xlib.Xatom.CARDINAL).value[0]
 
-    def set_current_desktop(self, new_index: int, timestamp: int = Xlib.X.CurrentTime) -> None:
+    def set_current_desktop(
+        self, new_index: int, timestamp: int = Xlib.X.CurrentTime
+    ) -> None:
         """
         Request to switch to another virtual desktop.
 
@@ -866,8 +870,14 @@ class EWMH(Window):
         prop = self.get_property("_NET_DESKTOP_LAYOUT", Xlib.Xatom.CARDINAL)
         return list(self._chunked(prop.value, 4))  # type: ignore
 
-    def set_desktop_layout(self, orientation: Orientation, columns: int, rows: int, starting_corner: Corner):
-        self.set_property("_NET_DESKTOP_LAYOUT",  (orientation, columns, rows, starting_corner), Xlib.Xatom.CARDINAL)
+    def set_desktop_layout(
+        self, orientation: Orientation, columns: int, rows: int, starting_corner: Corner
+    ):
+        self.set_property(
+            "_NET_DESKTOP_LAYOUT",
+            (orientation, columns, rows, starting_corner),
+            Xlib.Xatom.CARDINAL,
+        )
 
     def get_showing_desktop(self) -> bool:
         """
