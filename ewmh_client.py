@@ -59,7 +59,8 @@ import Xlib.xobject.drawable
 if t.TYPE_CHECKING:
     import Xlib.error
 
-_T = t.TypeVar("_T")
+# Type vars
+_T = t.TypeVar("_T")  # general-use
 
 # Aliases for XLib
 XWindow: te.TypeAlias = Xlib.xobject.drawable.Window  # Xlib Window
@@ -69,7 +70,6 @@ XAtom: te.TypeAlias = int
 XErrorHandler: te.TypeAlias = t.Callable[
     [Xlib.error.XError, t.Optional[Xlib.protocol.rq.Request]], _T
 ]
-
 
 # Other aliases and definitions
 AtomLike: te.TypeAlias = t.Union["Atom", int, str]
@@ -120,6 +120,20 @@ class Mode(enum.IntEnum):
     REPLACE = Xlib.X.PropModeReplace
     PREPEND = Xlib.X.PropModePrepend
     APPEND = Xlib.X.PropModeAppend
+
+
+class Orientation(enum.IntEnum):
+    """Orientation cardinal used in _NET_DESKTOP_LAYOUT"""
+    HORZ = 0
+    VERT = 1
+
+
+class Corner(enum.IntEnum):
+    """Starting corner of virtual desktops' layout, used in _NET_DESKTOP_LAYOUT"""
+    TOPLEFT = 0
+    TOPRIGHT = 1
+    BOTTOMRIGHT = 2
+    BOTTOMLEFT = 3
 
 
 class EwmhError(Exception):
@@ -486,6 +500,13 @@ class Window:
     #     _NET_WM_OPAQUE_REGION
     #     _NET_WM_BYPASS_COMPOSITOR
 
+    # -------------------------------------------------------------------------
+    # Utility methods
+    @staticmethod
+    def _chunked(data: t.Sequence[_T], chunk_size: int) -> t.Iterator[t.Tuple[_T, ...]]:
+        # Credit given where credit is due: https://stackoverflow.com/a/312464/624066
+        return (tuple(data[i:i + chunk_size]) for i in range(0, len(data), chunk_size))
+
     # TODO: add some methods from root that act upon itself (close, activate, etc)
 
 
@@ -556,7 +577,7 @@ class EWMH(Window):
 
         This property SHOULD be set and updated by the Window Manager.
         """
-        # In Unity, this is 1 even with 4 Workspaces enabled
+        # In Unity, this is 1 even with 4 Workspaces enabled, possibly a bug
         return self.get_property("_NET_NUMBER_OF_DESKTOPS", Xlib.Xatom.CARDINAL).value[0]
 
     def set_number_of_desktops(self, new_number_of_desktops: int) -> None:
@@ -589,7 +610,7 @@ class EWMH(Window):
         # In Unity, this is the combined area of all workspaces, if enabled.
         # With 4 Workspaces in a 2x2 arrangement, it returns (3840, 2400)
         prop = self.get_property("_NET_DESKTOP_GEOMETRY", Xlib.Xatom.CARDINAL)
-        return tuple(prop.value[:2])
+        return prop.value[0], prop.value[1]  # mypy dislikes tuple(prop.value[:2])
 
     def set_desktop_geometry(self, new_width: int, new_height: int) -> None:
         """
@@ -610,10 +631,9 @@ class EWMH(Window):
         """
         # Unity returns [(0, 0)] even with 4 2x2 Workspaces enabled, possibly a bug.
         prop = self.get_property("_NET_DESKTOP_VIEWPORT", Xlib.Xatom.CARDINAL)
-        return list(tuple(prop.value[i:i + 2]) for i in range(0, len(prop.value), 2))
-        # Credit given where credit is due: https://stackoverflow.com/a/312464/624066
+        return list(self._chunked(prop.value, 2))  # type: ignore
 
-    def set_desktop_viewport(self, new_vx, new_vy) -> None:
+    def set_desktop_viewport(self, new_vx: int, new_vy: int) -> None:
         """
         Request to change the viewport for the current desktop.
 
@@ -711,16 +731,164 @@ class EWMH(Window):
             window_id=window_to_activate.id,
         )
 
-    #     _net_workarea
-    #     _net_supporting_wm_check
-    #     _net_virtual_roots
-    #     _net_desktop_layout
-    #     _net_showing_desktop
-    #     _NET_WORKAREA
-    #     _NET_SUPPORTING_WM_CHECK
-    #     _NET_VIRTUAL_ROOTS
-    #     _NET_DESKTOP_LAYOUT
-    #     _NET_SHOWING_DESKTOP
+    def get_workarea(self) -> t.List[t.Tuple[int, int, int, int]]:
+        """
+        List of (x, y, width, height) geometry tuples representing the work area
+        for each desktop.
+
+        These geometries are specified relative to the viewport on each desktop
+        and specify an area that is completely contained within the viewport.
+        Work area SHOULD be used by desktop applications to place desktop icons
+        appropriately.
+
+        The Window Manager SHOULD calculate this space by taking the current page
+        minus space occupied by dock and panel windows, as indicated by the
+        _NET_WM_STRUT or _NET_WM_STRUT_PARTIAL properties set on client windows.
+        """
+        prop = self.get_property("_NET_WORKAREA", Xlib.Xatom.CARDINAL)
+        return list(self._chunked(prop.value, 4))  # type: ignore
+
+    # No set_workarea(), read-only per EWMH
+
+    def get_supporting_wm_check(self) -> Window:
+        """
+        Child window created by the WM to indicate that a compliant WM is active.
+
+        The Window Manager MUST set this property on the root window. The child
+        window MUST also have the _NET_SUPPORTING_WM_CHECK property set to the
+        ID of the child window. The child window MUST also have the _NET_WM_NAME
+        property set to the name of the Window Manager.
+
+        Rationale: The child window is used to distinguish an active Window Manager
+        from a stale _NET_SUPPORTING_WM_CHECK property that happens to point to
+        another window. If the _NET_SUPPORTING_WM_CHECK window on the client window
+        is missing or not properly set, clients SHOULD assume that no conforming
+        Window Manager is present.
+        """
+        # Corollary: for the name of the WM itself, use the recipe:
+        # root.get_supporting_wm_check().get_wm_name() -> "Compiz"
+
+        # Checking active and compliant WM is trickier: Root Windows's
+        # _NET_SUPPORTING_WM_CHECK might not exist (no WM or not compliant),
+        # it might point to a non-existing window, the child might not have
+        # _NET_SUPPORTING_WM_CHECK, or it may not point to itself (inactive).
+        # Also, child windows do not have the get_supporting_wm_check() method,
+        # so must use the lower-level get_property() directly.
+        prop = self.get_property("_NET_SUPPORTING_WM_CHECK", Xlib.Xatom.WINDOW)
+        return Window(prop.value[0], root=self)
+
+    # No set_supporting_wm_check(), read-only per EWMH
+
+    def get_virtual_roots(self) -> t.List[Window]:
+        """
+        List of Windows acting as virtual root windows for WM's virtual desktops.
+
+        To implement virtual desktops, some Window Managers re-parent client
+        windows to a child of the root window. Window Managers using this technique
+        MUST set this property to a list of IDs for windows that are acting as
+        virtual root windows. This property allows background setting programs to
+        work with virtual roots and allows clients to figure out the window manager
+        frame windows of their windows.
+        """
+        prop = self.get_property("_NET_VIRTUAL_ROOTS", Xlib.Xatom.WINDOW)
+        return [Window(window_id=w, root=self) for w in prop.value]
+
+    # No set_virtual_roots(), read-only per EWMH
+
+    def get_desktop_layout(self) -> t.Tuple[int, int, int, int]:
+        """
+        Describes the layout of virtual desktops relative to each other.
+
+        This property is set by a Pager, not by the Window Manager. When setting this
+        property, the Pager must own a manager selection (as defined in the ICCCM 2.8).
+        The manager selection is called _NET_DESKTOP_LAYOUT_Sn where n is the screen
+        number. The purpose of this property is to allow the Window Manager to know the
+        desktop layout displayed by the Pager.
+
+        More specifically, it describes the layout used by the owner of the manager
+        selection. The Window Manager may use this layout information or may choose to
+        ignore it. The property contains four values: the Pager orientation, the number
+        of desktops in the X direction, the number in the Y direction, and the starting
+        corner of the layout, i.e. the corner containing the first desktop.
+
+        Note: In order to interoperate with Pagers implementing an earlier draft of this
+        document, Window Managers should accept a _NET_DESKTOP_LAYOUT property of length
+        3 and use _NET_WM_TOPLEFT as the starting corner in this case.
+
+        The virtual desktops are arranged in a rectangle with `rows` rows and `columns`
+        columns. If rows times columns does not match the total number of desktops as
+        specified by _NET_NUMBER_OF_DESKTOPS, the highest-numbered workspaces are assumed
+        to be nonexistent. Either rows or columns (but not both) may be specified as 0
+        in which case its actual value will be derived from _NET_NUMBER_OF_DESKTOPS.
+
+        When the orientation is _NET_WM_ORIENTATION_HORZ the desktops are laid out in
+        rows, with the first desktop in the specified starting corner. So a layout with
+        four columns and three rows starting in the _NET_WM_TOPLEFT corner looks like
+        this:
+         +--+--+--+--+
+         | 0| 1| 2| 3|
+         +--+--+--+--+
+         | 4| 5| 6| 7|
+         +--+--+--+--+
+         | 8| 9|10|11|
+         +--+--+--+--+
+
+        With starting_corner _NET_WM_BOTTOMRIGHT, it looks like this:
+         +--+--+--+--+
+         |11|10| 9| 8|
+         +--+--+--+--+
+         | 7| 6| 5| 4|
+         +--+--+--+--+
+         | 3| 2| 1| 0|
+         +--+--+--+--+
+
+        When the orientation is _NET_WM_ORIENTATION_VERT the layout with four columns
+        and three rows starting in the _NET_WM_TOPLEFT corner looks like:
+         +--+--+--+--+
+         | 0| 3| 6| 9|
+         +--+--+--+--+
+         | 1| 4| 7|10|
+         +--+--+--+--+
+         | 2| 5| 8|11|
+         +--+--+--+--+
+
+        With starting_corner _NET_WM_TOPRIGHT, it looks like:
+         +--+--+--+--+
+         | 9| 6| 3| 0|
+         +--+--+--+--+
+         |10| 7| 4| 1|
+         +--+--+--+--+
+         |11| 8| 5| 2|
+         +--+--+--+--+
+
+        The numbers here are the desktop numbers, as for _NET_CURRENT_DESKTOP.
+        """
+        prop = self.get_property("_NET_DESKTOP_LAYOUT", Xlib.Xatom.CARDINAL)
+        return list(self._chunked(prop.value, 4))  # type: ignore
+
+    def set_desktop_layout(self, orientation: Orientation, columns: int, rows: int, starting_corner: Corner):
+        self.set_property("_NET_DESKTOP_LAYOUT",  (orientation, columns, rows, starting_corner), Xlib.Xatom.CARDINAL)
+
+    def get_showing_desktop(self) -> bool:
+        """
+        If the Window Manager is in "showing the desktop" mode.
+
+        Some Window Managers have a "showing the desktop" mode in which windows are hidden,
+        and the desktop background is displayed and focused. If a Window Manager supports
+        the _NET_SHOWING_DESKTOP hint, it MUST set it to a value of 1 when the Window Manager
+        is in "showing the desktop" mode, and a value of zero if the Window Manager is not
+        in this mode.
+        """
+        # Unity bug: always report True. Toggling mode with set_showing_desktop() works fine
+        return bool(self.get_property("_NET_SHOWING_DESKTOP", Xlib.Xatom.CARDINAL).value[0])
+
+    def set_showing_desktop(self, showing_desktop_mode: bool):
+        """
+        Request to enter or leave the "showing the desktop" mode.
+
+        The Window Manager may choose to ignore this.
+        """
+        self.send_message("_NET_SHOWING_DESKTOP", showing_desktop_mode)
 
     # -------------------------------------------------------------------------
     # Other Root Window Messages
@@ -739,19 +907,9 @@ class EWMH(Window):
             window_id=window_to_close.id,
         )
 
-    def moveresize_window(
-        self,
-        window_to_move: Window,
-        timestamp: int = Xlib.X.CurrentTime,
-        source_indication: Source = Source.USER,
-    ) -> None:
-        return
-        self.send_message(
-            "_NET_MOVERESIZE_WINDOW",
-            timestamp,
-            source_indication,
-            window_id=window_to_move.id,
-        )
+    # def get_moveresize_window()
+    #     self.send_message("_NET_MOVERESIZE_WINDOW",
+
     #     _net_wm_moveresize
     #     _net_restack_window
     #     _net_request_frame_extents
