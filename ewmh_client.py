@@ -78,6 +78,9 @@ AtomLike: te.TypeAlias = t.Union["Atom", int, str]
 # https://stackoverflow.com/a/69200620/624066
 PropertyValue: te.TypeAlias = t.Union[bytes, t.Sequence[int]]
 
+# In _NET_WM_DESKTOP, 0xFFFFFFFF indicates that the window SHOULD appear on all desktops
+WM_DESKTOP_ALL: int = 0xFFFFFFFF
+
 
 class Source(enum.IntEnum):
     """
@@ -467,12 +470,84 @@ class Window:
         return self.get_text_property("_NET_WM_NAME", self.UTF8_STRING)
 
     def set_wm_name(self, text: str) -> None:
-        self.set_text_property("_NET_WM_NAME", text, self.UTF8_STRING)
+        """Set the window title"""
+        self.set_text_property("_NET_WM_NAME", text)
 
-    #     _net_wm_visible_name
-    #     _net_wm_icon_name
-    #     _net_wm_visible_icon_name
-    #     _net_wm_desktop
+    def get_wm_visible_name(self) -> str:
+        """
+        Displayed window title, if different from _NET_WM_NAME.
+
+        If the Window Manager displays a window name other than _NET_WM_NAME the Window
+        Manager MUST set this to the title displayed.
+
+        Rationale: This property is for Window Managers that display a title different
+        from the _NET_WM_NAME or WM_NAME of the window (i.e. xterm <1>, xterm <2>, ...
+        is shown, but _NET_WM_NAME / WM_NAME is still xterm for each window) thereby
+        allowing Pagers to display the same title as the Window Manager.
+
+        Read-only for clients, should be set only by the Window Manager.
+        """
+        return self.get_text_property("_NET_WM_VISIBLE_NAME", self.UTF8_STRING)
+
+    def get_wm_icon_name(self) -> str:
+        """
+        Window icon title.
+
+        If set, the Window Manager should use this in preference to WM_ICON_NAME.
+        """
+        return self.get_text_property("_NET_WM_ICON_NAME", self.UTF8_STRING)
+
+    def set_wm_icon_name(self, text: str) -> None:
+        """Set the window icon title"""
+        self.set_text_property("_NET_WM_ICON_NAME", text)
+
+    def get_wm_visible_icon_name(self) -> str:
+        """
+        Displayed window icon title, if different from _NET_WM_ICON_NAME.
+
+        If the Window Manager displays an icon title other than _NET_WM_ICON_NAME the
+        Window Manager MUST set this to the icon title displayed.
+
+        Read-only for clients, should be set only by the Window Manager.
+        """
+        return self.get_text_property("_NET_WM_VISIBLE_ICON_NAME", self.UTF8_STRING)
+
+    def get_wm_desktop(self) -> int:
+        """
+        The desktop this window is in (or wants to be) starting with 0 for the first desktop.
+
+         A Client MAY choose not to set this property, in which case the Window Manager
+         SHOULD place it as it wishes. WINDOW_DESKTOP_ALL indicates that the window
+         SHOULD appear on all desktops.
+
+        The Window Manager should honor _NET_WM_DESKTOP whenever a withdrawn window
+        requests to be mapped.
+
+        The Window Manager should remove the property whenever a window is withdrawn, but
+        it should leave the property in place when it is shutting down, e.g. in response
+        to losing ownership of the WM_Sn manager selection.
+
+        Rationale: Removing the property upon window withdrawal helps legacy applications
+        which want to reuse withdrawn windows. Not removing the property upon shutdown
+        allows the next Window Manager to restore windows to their previous desktops.
+        """
+        return self.get_property("_NET_WM_DESKTOP", Xlib.Xatom.CARDINAL).value[0]
+
+    def set_wm_desktop(
+        self, new_desktop: int, source_indication: Source = Source.USER
+    ) -> None:
+        """
+        Request a change of desktop for a non-withdrawn (i.e. mapped) window
+
+        TODO: For withdrawn, unmapped windows it should set_property() directly
+        """
+        self.send_message(
+            "_NET_WM_DESKTOP",
+            new_desktop,
+            source_indication,
+            window_id=self.id,
+        )
+
     #     _net_wm_window_type
     #     _net_wm_state
     #     _net_wm_allowed_actions
@@ -488,10 +563,6 @@ class Window:
     #     _net_wm_opaque_region
     #     _net_wm_bypass_compositor
 
-    #     _NET_WM_VISIBLE_NAME
-    #     _NET_WM_ICON_NAME
-    #     _NET_WM_VISIBLE_ICON_NAME
-    #     _NET_WM_DESKTOP
     #     _NET_WM_WINDOW_TYPE
     #     _NET_WM_STATE
     #     _NET_WM_ALLOWED_ACTIONS
