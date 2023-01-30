@@ -215,7 +215,7 @@ class Atom(int):
         return super().__hash__()
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}({super().__repr__()}) {self.name}>"
+        return f"<{self.__class__.__name__}({super().__repr__()}) {self.name!r}>"
 
     def __str__(self) -> str:
         return self.name
@@ -459,6 +459,11 @@ class Window:
     # -------------------------------------------------------------------------
     # Application Window Properties
     def get_wm_name(self) -> str:
+        """
+        Window title.
+
+        If set, the Window Manager should use this in preference to WM_NAME
+        """
         return self.get_text_property("_NET_WM_NAME", self.UTF8_STRING)
 
     def set_wm_name(self, text: str) -> None:
@@ -872,7 +877,7 @@ class EWMH(Window):
 
     def set_desktop_layout(
         self, orientation: Orientation, columns: int, rows: int, starting_corner: Corner
-    ):
+    ) -> None:
         self.set_property(
             "_NET_DESKTOP_LAYOUT",
             (orientation, columns, rows, starting_corner),
@@ -892,7 +897,7 @@ class EWMH(Window):
         # Unity bug: always report True. Toggling mode with set_showing_desktop() works fine
         return bool(self.get_property("_NET_SHOWING_DESKTOP", Xlib.Xatom.CARDINAL).value[0])
 
-    def set_showing_desktop(self, showing_desktop_mode: bool):
+    def set_showing_desktop(self, showing_desktop_mode: bool) -> None:
         """
         Request to enter or leave the "showing the desktop" mode.
 
